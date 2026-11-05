@@ -1,0 +1,62 @@
+name: Generate audio (SILMA TTS V1)
+on:
+  workflow_dispatch:
+    inputs:
+      ref_file:
+        description: "Optional reference recording in the repo, e.g. ref/voice.wav (blank = voice bundled with silma-tts)"
+        required: false
+        default: ""
+      ref_text:
+        description: "Exact words spoken in that recording (required if ref_file is set)"
+        required: false
+        default: ""
+      ids:
+        description: "Optional space-separated ids to regenerate, e.g. w001 s02_01 (blank = all 542)"
+        required: false
+        default: ""
+      speed:
+        description: "Speech speed, 1.0 = normal (default 0.85 for learners)"
+        required: false
+        default: "0.85"
+      commit:
+        description: "Commit the MP3s into public/audio"
+        type: boolean
+        default: false
+permissions:
+  contents: write
+jobs:
+  audio:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pip install silma-tts
+      - name: Generate audio
+        env:
+          REF_FILE: ${{ inputs.ref_file }}
+          REF_TEXT: ${{ inputs.ref_text }}
+          IDS: ${{ inputs.ids }}
+          SPEED: ${{ inputs.speed }}
+        run: |
+          args=(--out audio --speed "$SPEED" --force)
+          if [ -n "$REF_FILE" ]; then args+=(--ref "$REF_FILE" --ref-text "$REF_TEXT"); fi
+          if [ -n "$IDS" ]; then args+=(--ids $IDS); fi
+          python tools/generate_audio.py "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audio
+          path: audio
+      - name: Commit audio
+        if: ${{ inputs.commit }}
+        run: |
+          mkdir -p public/audio
+          cp audio/*.mp3 public/audio/
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add public/audio
+          git commit -m "Regenerate audio with SILMA TTS V1" || echo "No changes"
+          git push
